@@ -14,9 +14,11 @@ Embeds HybridQA's hyperlinked Wikipedia passages locally and serves them from a 
 ## Corpus and model
 
 - Source: `WikiTables-WithLinks/request_tok` at revision `dc066e1a`, the passage text behind every `/wiki/...` link in the HybridQA tables.
-- 512,670 table-to-passage links dedupe to **286,267 unique non-empty passages** (median 120 words, p99 411). One passage = one vector; no chunking, so record identity matches HybridQA's gold passage links.
+- 512,734 non-empty table-to-passage links dedupe to **286,267 unique non-empty passages** (median 120 words, p99 411). One passage = one vector; no chunking, so record identity matches HybridQA's gold passage links.
 - Embedding model: `BAAI/bge-small-en-v1.5` (384-d, cosine, run locally — free). Passages are embedded as `"{title}. {text}"`; queries get the bge query instruction (handled by `retriever.py`).
 - Size: 286K × 384 × 4 B ≈ 440 MB of vectors plus ~190 MB of passage text.
+
+The encoder accepts at most [512 tokens](https://huggingface.co/BAAI/bge-small-en-v1.5), including the title; longer passages are truncated for embedding, while metadata retains the full text.
 
 ## Pinecone index
 
@@ -30,6 +32,8 @@ Record id: the `/wiki/...` link, percent-encoded because Pinecone ids must be AS
 | `title`, `text` | Passage title and full text |
 | `table_ids` | HybridQA tables linking to this passage, capped at 300 (Pinecone's 40 KB metadata limit) |
 | `table_count` | True number of linking tables; the complete link map is in PostgreSQL |
+
+Table filtering uses the capped `table_ids` metadata. For the 12 passages linked from more than 300 tables, filtering on an omitted table can miss a relevant passage (2,418 omitted links across this corpus). This is a retrieval limitation; use PostgreSQL's complete link map when exhaustive table membership is required.
 
 ## Free-plan budget
 
@@ -47,6 +51,12 @@ python pipeline.py embed        # uses CUDA/MPS when available; resumes from dat
 python pipeline.py upload
 python pipeline.py verify
 ```
+
+`download` caches and checksum-verifies the pinned corpus ZIP without extracting filenames, so it also works on Windows. To reuse the same archive already downloaded for PostgreSQL, run `python pipeline.py download --archive /path/to/corpus.zip`. Existing `data/WikiTables-WithLinks/request_tok/` checkouts remain readable when no cached ZIP is present.
+
+Upload checkpoints are bound to the Pinecone index host and the hashes of both local data files. A different index, modified data, or an older checkpoint containing only `next` is rejected before upserting. Keep the checkpoint for ordinary resumes. For an intentional fresh upload, move `data/upload_checkpoint.json` aside first; this re-sends every record and consumes write units. Recreating or clearing an index also requires starting a fresh upload.
+
+Offline checks: `python -m pytest -q`. These cover parsing, portable downloads, checkpoint isolation and retry, and the retriever's query/evidence contract without calling Pinecone or downloading a model.
 
 On Apple Silicon the MPS backend ran out of memory on the full corpus; `python pipeline.py embed --device cpu` finished all 286,267 passages in 28 minutes on an M-series CPU.
 

@@ -1,16 +1,18 @@
 """Embed HybridQA passages locally and seed the shared Pinecone index.
 
 Commands (run from this vector/ directory):
-    python pipeline.py download            sparse-clone the passage files into data/
+    python pipeline.py download            cache the pinned corpus archive in data/
     python pipeline.py embed [--limit N]   write data/embeddings.npy + data/passages.parquet
     python pipeline.py upload              resumable upsert into Pinecone
     python pipeline.py verify              index stats and a sample query
 """
 import argparse
-import glob
+import hashlib
 import json
 import os
-import subprocess
+import shutil
+import urllib.request
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -21,8 +23,9 @@ from tqdm import tqdm
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE / 'data'
-PASSAGE_REPO = 'https://github.com/wenhuchen/WikiTables-WithLinks.git'
 PASSAGE_REVISION = 'dc066e1a6d5281511d8b73a6107d5ad2824cc2b2'
+PASSAGE_SHA256 = '6d4bac29d4a72bb387230ea7de596d4a8e4965528a2997c9d5f2b13d017c8244'
+ARCHIVE = DATA / 'corpus.zip'
 REQUEST_TOK = DATA / 'WikiTables-WithLinks' / 'request_tok'
 EMBEDDINGS = DATA / 'embeddings.npy'
 PASSAGES = DATA / 'passages.parquet'
@@ -69,15 +72,34 @@ def empty_device_cache(device):
         torch.cuda.empty_cache()
 
 
-def load_passages(request_tok_dir=REQUEST_TOK):
-    """Each request_tok file is one table's {"/wiki/X": text} map; dedupe by link."""
-    passages = {}
-    files = sorted(glob.glob(str(Path(request_tok_dir) / '*.json')))
+def passage_maps(request_tok_dir=REQUEST_TOK, archive_path=None):
+    # Read source names inside the ZIP: some table IDs contain characters that
+    # cannot be checked out as filenames on Windows. Never extract those paths.
+    if archive_path is None and request_tok_dir == REQUEST_TOK and ARCHIVE.exists():
+        archive_path = ARCHIVE
+    if archive_path is not None:
+        with zipfile.ZipFile(archive_path) as archive:
+            prefix = f'WikiTables-WithLinks-{PASSAGE_REVISION}/request_tok/'
+            names = sorted(n for n in archive.namelist()
+                           if n.startswith(prefix) and n.endswith('.json')
+                           and '/' not in n[len(prefix):])
+            if not names:
+                raise ValueError('Archive contains no passage files at the pinned revision')
+            for name in tqdm(names, desc='reading passages'):
+                yield name[len(prefix):-5], json.loads(archive.read(name))
+        return
+    files = sorted(Path(request_tok_dir).glob('*.json'))
     if not files:
         raise SystemExit(f'no passage files in {request_tok_dir}; run `python pipeline.py download`')
     for path in tqdm(files, desc='reading passages'):
-        table_id = Path(path).stem
-        for link, text in json.loads(Path(path).read_text(encoding='utf-8')).items():
+        yield path.stem, json.loads(path.read_text(encoding='utf-8'))
+
+
+def load_passages(request_tok_dir=REQUEST_TOK, archive_path=None):
+    """Each request_tok file is one table's {"/wiki/X": text} map; dedupe by link."""
+    passages = {}
+    for table_id, contents in passage_maps(request_tok_dir, archive_path):
+        for link, text in contents.items():
             text = text.strip()
             if not text:
                 continue
@@ -100,14 +122,30 @@ def to_metadata(passage):
     }
 
 
-def cmd_download(_args):
-    target = DATA / 'WikiTables-WithLinks'
-    if not target.exists():
-        DATA.mkdir(exist_ok=True)
-        subprocess.run(['git', 'clone', '--filter=blob:none', '--sparse', '--no-checkout', PASSAGE_REPO, str(target)], check=True)
-    subprocess.run(['git', '-C', str(target), 'sparse-checkout', 'set', 'request_tok'], check=True)
-    subprocess.run(['git', '-C', str(target), 'checkout', '-q', PASSAGE_REVISION], check=True)
-    print(f'{len(list(REQUEST_TOK.glob("*.json")))} passage files at {PASSAGE_REVISION[:12]}')
+def file_sha256(path):
+    with open(path, 'rb') as stream:
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+        return digest.hexdigest()
+
+
+def cmd_download(args):
+    DATA.mkdir(parents=True, exist_ok=True)
+    if not ARCHIVE.exists():
+        temporary = ARCHIVE.with_suffix('.partial')
+        if args.archive:
+            shutil.copyfile(args.archive, temporary)
+        else:
+            url = f'https://codeload.github.com/wenhuchen/WikiTables-WithLinks/zip/{PASSAGE_REVISION}'
+            with urllib.request.urlopen(url, timeout=120) as response, temporary.open('wb') as output:
+                shutil.copyfileobj(response, output)
+        if file_sha256(temporary) != PASSAGE_SHA256:
+            raise ValueError('Corpus archive checksum mismatch; cached download was not replaced')
+        temporary.replace(ARCHIVE)
+    if file_sha256(ARCHIVE) != PASSAGE_SHA256:
+        raise ValueError('Corpus archive checksum mismatch')
+    print(f'verified {ARCHIVE.name} at {PASSAGE_REVISION[:12]}')
 
 
 def cmd_embed(args):
@@ -152,13 +190,25 @@ def get_index(create=False):
 
 
 def cmd_upload(args):
-    emb = np.load(EMBEDDINGS)
+    emb = np.load(EMBEDDINGS, mmap_mode='r')
     passages = pq.read_table(PASSAGES).to_pylist()
-    assert len(emb) == len(passages)
+    if emb.shape != (len(passages), DIM):
+        raise ValueError('Embeddings must have one 384-dimensional vector per passage')
     end = min(len(passages), args.limit or len(passages))
     # Resume from the checkpoint: re-upserting existing records costs extra write units.
-    done = json.loads(CHECKPOINT.read_text())['next'] if CHECKPOINT.exists() else 0
     index = get_index(create=True)
+    context = {'index_host': index.config.host,
+               'embeddings_sha256': file_sha256(EMBEDDINGS),
+               'passages_sha256': file_sha256(PASSAGES)}
+    done = 0
+    if CHECKPOINT.exists():
+        checkpoint = json.loads(CHECKPOINT.read_text(encoding='utf-8'))
+        if checkpoint.get('context') != context:
+            raise ValueError('Upload checkpoint belongs to another index/dataset or uses the old format. '
+                             'Move it aside only when intentionally starting an upload from row zero.')
+        done = checkpoint['next']
+        if type(done) is not int or not 0 <= done <= len(passages):
+            raise ValueError('Invalid upload checkpoint position')
     for start in tqdm(range(done, end, UPSERT_BATCH), desc='upserting', initial=done // UPSERT_BATCH,
                       total=-(-end // UPSERT_BATCH)):
         batch = range(start, min(start + UPSERT_BATCH, end))
@@ -166,8 +216,10 @@ def cmd_upload(args):
             {'id': record_id(passages[i]['passage_id']), 'values': emb[i].tolist(), 'metadata': to_metadata(passages[i])}
             for i in batch
         ])
-        CHECKPOINT.write_text(json.dumps({'next': batch.stop}))
-    print(f'upserted through row {end} of {len(passages)}')
+        temporary = CHECKPOINT.with_suffix('.partial')
+        temporary.write_text(json.dumps({'context': context, 'next': batch.stop}), encoding='utf-8')
+        temporary.replace(CHECKPOINT)
+    print(f'upserted through row {max(done, end)} of {len(passages)}')
 
 
 def cmd_verify(_args):
@@ -185,7 +237,9 @@ def cmd_verify(_args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('download').set_defaults(func=cmd_download)
+    download = sub.add_parser('download')
+    download.add_argument('--archive', type=Path, help='reuse a local copy of the pinned corpus ZIP')
+    download.set_defaults(func=cmd_download)
     embed = sub.add_parser('embed')
     embed.add_argument('--limit', type=int)
     embed.add_argument('--batch-size', type=int, default=64)
@@ -196,6 +250,10 @@ def main():
     upload.set_defaults(func=cmd_upload)
     sub.add_parser('verify').set_defaults(func=cmd_verify)
     args = parser.parse_args()
+    for option in ('limit', 'batch_size'):
+        value = getattr(args, option, None)
+        if value is not None and value < 1:
+            parser.error(f'--{option.replace("_", "-")} must be positive')
     args.func(args)
 
 

@@ -30,6 +30,8 @@ Each hit is a dict:
 - `title`: passage title.
 - `table_ids`: HybridQA tables linking to the passage (first 300); `table_count` is the true total. Use PostgreSQL for the complete link map of very common entities (e.g. `/wiki/United_States`, 831 tables).
 
+The optional table filter only searches those stored table IDs. It can miss a common entity when the requested table was omitted by the 300-table cap; it is not an exhaustive table-to-passage lookup. Full passage text is returned, but the embedding model only encodes the first 512 tokens including the title.
+
 ## Budget etiquette
 
 The free plan includes 1M read units per month, about 1.5M queries for this index — enough for evaluation, but cache retrieval results for repeated experiment runs rather than re-querying. Only the owner runs `upload`; writes are capped at 2M units per month and a full seed uses about half.
