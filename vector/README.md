@@ -22,7 +22,7 @@ The encoder accepts at most [512 tokens](https://huggingface.co/BAAI/bge-small-e
 
 ## Pinecone index
 
-`hybridqa-passages`, serverless AWS us-east-1 (Starter/free plan), dimension 384, cosine.
+`hybridqa-passages`, serverless AWS us-east-1, dimension 384, cosine.
 
 Record id: the `/wiki/...` link, percent-encoded because Pinecone ids must be ASCII (22K links are not, e.g. `/wiki/São_Paulo`). Metadata:
 
@@ -35,9 +35,11 @@ Record id: the `/wiki/...` link, percent-encoded because Pinecone ids must be AS
 
 Table filtering uses the capped `table_ids` metadata. For the 12 passages linked from more than 300 tables, filtering on an omitted table can miss a relevant passage (2,418 omitted links across this corpus). This is a retrieval limitation; use PostgreSQL's complete link map when exhaustive table membership is required.
 
-## Free-plan budget
+## Usage accounting
 
-Starter allows 2 GB storage, 2M write units and 1M read units per month. A query costs 1 RU per GB of namespace (this index ≈ 0.65 GB), regardless of `top_k`, so ~1.5M queries/month. Upserts cost 1 WU per KB: a full seed uses roughly 0.7–1.3M WU, so **only seed once per month**. `upload` checkpoints to `data/upload_checkpoint.json` and resumes instead of re-sending records.
+Read units, write units, storage, and response egress depend on the account's plan. Returning vectors and full passage metadata can make egress a limiting factor. Use recorded SDK usage and the [evaluation estimator](../docs/evaluation.md#cost-and-runtime-estimates); its byte estimates are not billing measurements. Consult [Pinecone's current plans](https://www.pinecone.io/pricing/) and [usage accounting](https://docs.pinecone.io/guides/cost/understand-cost).
+
+`upload` checkpoints completed records and resumes instead of resending them. Existing checkpoints must match the index host and source-file hashes.
 
 ## Rebuild as the index maintainer
 

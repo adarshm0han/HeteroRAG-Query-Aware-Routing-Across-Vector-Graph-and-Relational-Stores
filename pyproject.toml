@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["baseline/tests", "routing/tests"]
+
+[tool.ruff]
+target-version = "py311"
+# Standalone ingestion components retain their original formatting.
+extend-exclude = ["artifacts", "routing/runs", "routing/evaluation-data", "baseline/runs", "postgres", "vector"]

@@ -1,6 +1,6 @@
 # Querying the shared Pinecone passage index
 
-The index `hybridqa-passages` is already seeded with all 286,267 HybridQA passages. You only need the API key, shared privately by the index owner (Vaibav). Put it in `vector/.env` (ignored by Git), using `vector/.env.example` as the template. Never post the key in issues, logs, screenshots, or pull requests.
+The index `hybridqa-passages` is already seeded with all 286,267 HybridQA passages. You only need the API key, shared privately by the index owner. Put it in `vector/.env` (ignored by Git), using `vector/.env.example` as the template. Never post the key in issues, logs, screenshots, or pull requests.
 
 ```bash
 cd vector
@@ -32,6 +32,8 @@ Each hit is a dict:
 
 The optional table filter only searches those stored table IDs. It can miss a common entity when the requested table was omitted by the 300-table cap; it is not an exhaustive table-to-passage lookup. Full passage text is returned, but the embedding model only encodes the first 512 tokens including the title.
 
-## Budget etiquette
+## Usage accounting
 
-The free plan includes 1M read units per month, about 1.5M queries for this index — enough for evaluation, but cache retrieval results for repeated experiment runs rather than re-querying. Only the owner runs `upload`; writes are capped at 2M units per month and a full seed uses about half.
+Query and fetch requests can consume read units and response egress. Returned vectors, metadata, and passage text contribute to response size. Check the configured account's current quotas before large experiments; do not infer a fixed query allowance from index size. The evaluation logs SDK usage and estimates response bytes. See [the estimation procedure](evaluation.md#cost-and-runtime-estimates).
+
+Index uploads are maintenance operations. Preserve upload checkpoints so resuming does not resend completed records.

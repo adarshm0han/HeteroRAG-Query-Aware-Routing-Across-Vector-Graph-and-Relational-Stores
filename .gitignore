@@ -14,3 +14,15 @@ __pycache__/
 *.zip
 *.partial
 .DS_Store
+baseline/runs/
+routing/runs/
+routing/evaluation-data/
+artifacts/
+.ruff_cache/
+baseline/reports/
+routing/reports/
+*.egg-info/
+postgres/reports/
+*.ppt
+*.pptx
+*.pdf

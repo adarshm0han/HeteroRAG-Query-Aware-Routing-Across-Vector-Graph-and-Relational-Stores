@@ -15,7 +15,6 @@ This component downloads HybridQA, normalizes Wikipedia tables into PostgreSQL, 
 | `examples.sql` | Lookup, numeric ranking, aggregation, and entity joins |
 | `examples/read_rows.py` | Runnable read-only RAG connection example |
 | `test_pipeline.py` | Offline parsing/shape tests |
-| `reports/` | Sanitized initial deployment evidence |
 
 ## Rebuild as the database maintainer
 
@@ -41,7 +40,7 @@ python provision_readers.py
 python status.py --env .env
 ```
 
-The hosted import requires a matching local measurement below 700,000,000 bytes, leaving room under the free storage quota. The initial full deployment was 264,552,448 bytes. Check current free-plan compute and storage allowances in the Neon console. No paid upgrade is performed by these scripts.
+The hosted import requires a matching local measurement below 700,000,000 bytes. Check current compute and storage allowances in the Neon console. Verification commands write local reports under ignored `reports/`; generated deployment and smoke-test reports are not published as experiment results.
 
 Imports commit complete tables in batches of 200 and resume from completed batches. Identical reruns leave counts unchanged. Source revisions and selection hashes must match; switching selections requires a fresh database. Use a direct connection for migrations/imports and pooled connections for RAG queries.
 

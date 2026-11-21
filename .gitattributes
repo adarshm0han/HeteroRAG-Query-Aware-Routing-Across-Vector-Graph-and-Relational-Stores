@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# This frozen input is verified byte-for-byte, including its original newlines.
+experiments/heterorag/routing-fusion/graph-table-ids.json -text whitespace=cr-at-eol

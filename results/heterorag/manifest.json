@@ -1,0 +1,16 @@
+{
+  "experiment": "heterorag-routing-fusion-link-access",
+  "schema_version": 1,
+  "outcomes": 6000,
+  "source_checkpoint_verification": "All 6,000 original result envelopes verified before export; question, prediction, status and answer scores checked against saved evaluation CSVs.",
+  "files": {
+    "analysis.json": "de0bee8aeec204c0d24fe8fe6ea7e610c77fe3337585695a9309ed63865315ef",
+    "condition-metrics.csv": "6d38677fe859a7f495f48baea6a7843e0d2c6610fd9bd02e6f04ca898249026b",
+    "evidence-traces.jsonl": "db64ba68ac7c3c147566ae271ccb7f46d733c17a911d6b60d54841635c8a571c",
+    "experiment.json": "4ed758003ad5d0386b50b33250b8780b4c749848b5d8ae3f61b55f70d79a7623",
+    "graph-strata.csv": "e203e2a9daeaf8e84093e912b4ac660f131a01fc5ddf9adb19951566fe8d0309",
+    "outcomes.csv": "b04e4d2a1c085ab497887794afa97059e41ecd6889602a578d3395cb91fb0025",
+    "paired-comparisons.csv": "57495995f4573625393461ef8a9e4a4ff4cdc00f9d92ea1df495a724530b1848",
+    "provenance.json": "98e72d271abc48231ffc66d94d84c71f0d3df748db9fa12b3371136eda3bd563"
+  }
+}
